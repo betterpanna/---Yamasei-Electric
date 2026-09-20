@@ -1,0 +1,6 @@
+{
+  "name": "山清電気商会 - Yamasei Electric",
+  "description": "山清電気商会（Yamasei Electric）の公式B2B企業ウェブサイト。法人・施設・工事会社向けの電気設備工事、高圧受変電、保守点検、LED更新、省エネ提案及びお見積り窓口。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
