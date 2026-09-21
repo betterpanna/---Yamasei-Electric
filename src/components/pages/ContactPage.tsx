@@ -88,6 +88,14 @@ export const ContactPage: React.FC<ContactPageProps> = ({
     setTurnstileToken(null);
   };
 
+  // The database stores a readable Japanese work-type label rather than the
+  // internal service id, so it reads sensibly straight from the table.
+  const resolveWorkTypeLabel = (serviceId: string): string => {
+    const matched = servicesData.find((s) => s.id === serviceId);
+    if (matched) return matched.title.ja;
+    return serviceId === 'other' ? 'その他・総合相談' : serviceId;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
@@ -139,10 +147,10 @@ export const ContactPage: React.FC<ContactPageProps> = ({
           email: formData.email,
           phone: formData.phone,
           preferred_contact: formData.preferredContact,
-          service_category: formData.serviceCategory,
-          project_location: formData.projectLocation,
-          desired_timeline: formData.desiredTimeline,
-          description: formData.description,
+          work_type: resolveWorkTypeLabel(formData.serviceCategory),
+          work_location: formData.projectLocation,
+          desired_timing: formData.desiredTimeline,
+          message: formData.description,
           privacy_consent: formData.privacyConsent,
           turnstile_token: turnstileToken,
         }),
