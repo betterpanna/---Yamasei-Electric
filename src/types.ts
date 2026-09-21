@@ -73,6 +73,5 @@ export interface InquiryFormData {
   desiredTimeline: string;
   description: string;
   privacyConsent: boolean;
-  attachments: { name: string; size: number; type: string }[];
   honeypot: string;
 }

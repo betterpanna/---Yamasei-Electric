@@ -1,22 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Language, PageId, InquiryFormData } from '../../types';
 import { translations } from '../../data/translations';
 import { defaultCompanyFacts, servicesData } from '../../data/companyData';
+import { TurnstileWidget, TurnstileWidgetHandle } from '../TurnstileWidget';
 import {
   Mail,
   Phone,
   Send,
   CheckCircle2,
   AlertCircle,
-  Paperclip,
-  X,
-  FileText,
   Lock,
   Copy,
   Check,
   Clock,
   MapPin,
 } from 'lucide-react';
+
+// Supabase Edge Function that validates the Turnstile token server-side and
+// inserts the inquiry into public.inquiries. No Supabase API key is sent:
+// the function has verify_jwt disabled and is meant to be called directly
+// from the browser.
+const SUBMIT_INQUIRY_ENDPOINT = 'https://bjdsqisygrrssgflmkzt.supabase.co/functions/v1/submit-inquiry';
 
 interface ContactPageProps {
   lang: Language;
@@ -44,7 +48,6 @@ export const ContactPage: React.FC<ContactPageProps> = ({
     desiredTimeline: '',
     description: prefilledDesc || '',
     privacyConsent: false,
-    attachments: [],
     honeypot: '',
   });
 
@@ -60,11 +63,14 @@ export const ContactPage: React.FC<ContactPageProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submissionResult, setSubmissionResult] = useState<{
-    referenceId: string;
-    submittedAt: string;
-    targetEmail: string;
+    referenceId: string | null;
   } | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileStatus, setTurnstileStatus] = useState<'pending' | 'ready' | 'expired' | 'error'>('pending');
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   const phoneFact = defaultCompanyFacts.find((f) => f.key === 'phone');
   const emailFact = defaultCompanyFacts.find((f) => f.key === 'email');
@@ -77,40 +83,17 @@ export const ContactPage: React.FC<ContactPageProps> = ({
     : undefined;
   const mapDirectionsUrl = `https://www.google.com/maps/search/?api=1&query=${mapQuery}`;
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const newAttachments = [...formData.attachments];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (newAttachments.length >= 3) {
-        alert(lang === 'ja' ? '添付ファイルは最大3点までとなります。' : 'Maximum 3 files allowed.');
-        break;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        alert(lang === 'ja' ? '1ファイルあたり10MB以下にしてください。' : 'File size must be under 10MB.');
-        continue;
-      }
-      newAttachments.push({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-      });
-    }
-
-    setFormData({ ...formData, attachments: newAttachments });
+  const resetTurnstile = () => {
+    turnstileRef.current?.reset();
+    setTurnstileToken(null);
   };
 
-  const removeAttachment = (index: number) => {
-    const next = [...formData.attachments];
-    next.splice(index, 1);
-    setFormData({ ...formData, attachments: next });
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+
+    // Prevent duplicate submissions from double-clicks or a slow network.
+    if (isSubmitting) return;
 
     // Spam honeypot detection
     if (formData.honeypot) {
@@ -134,43 +117,76 @@ export const ContactPage: React.FC<ContactPageProps> = ({
       return;
     }
 
+    if (turnstileSiteKey && turnstileStatus === 'error') {
+      setSubmitError(t.errorTurnstileUnavailable);
+      return;
+    }
+
+    if (!turnstileToken) {
+      setSubmitError(t.errorTurnstileMissing);
+      return;
+    }
+
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      setIsSubmitting(false);
-
-      const refId = `YMS-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
-      const timestamp = new Date().toLocaleString(lang === 'ja' ? 'ja-JP' : 'en-US');
-      const targetEmail = emailFact?.value[lang] || 'yamakiyo@sweet.ocn.ne.jp';
-
-      // Keep a local copy so the customer can retrieve/copy it again if needed.
-      // This form has no backend: the inquiry is only actually sent once the
-      // customer's email app opens (below) and they press send.
-      try {
-        const storedInquiries = JSON.parse(localStorage.getItem('yamasei_inquiries') || '[]');
-        storedInquiries.push({ refId, timestamp, ...formData });
-        localStorage.setItem('yamasei_inquiries', JSON.stringify(storedInquiries));
-      } catch (err) {
-        console.error('Storage note:', err);
-      }
-
-      setSubmissionResult({
-        referenceId: refId,
-        submittedAt: timestamp,
-        targetEmail,
+    try {
+      const response = await fetch(SUBMIT_INQUIRY_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: formData.companyName,
+          contact_name: formData.contactName,
+          email: formData.email,
+          phone: formData.phone,
+          preferred_contact: formData.preferredContact,
+          service_category: formData.serviceCategory,
+          project_location: formData.projectLocation,
+          desired_timeline: formData.desiredTimeline,
+          description: formData.description,
+          privacy_consent: formData.privacyConsent,
+          turnstile_token: turnstileToken,
+        }),
       });
 
-      // Open the customer's email app with the inquiry pre-filled so it
-      // actually reaches the company (there is no server to receive this form).
-      window.location.href = buildMailtoLink(refId, timestamp, targetEmail);
-    }, 400);
+      // A Turnstile token can only be redeemed once; get a fresh one ready
+      // for either a retry after failure or a brand new submission.
+      resetTurnstile();
+
+      let data: Record<string, unknown> = {};
+      try {
+        data = await response.json();
+      } catch {
+        // Non-JSON or empty body; fall through to status-based handling.
+      }
+
+      if (!response.ok) {
+        const serverMessage = typeof data.error === 'string' ? data.error : undefined;
+        setSubmitError(serverMessage || t.errorGeneral);
+        return;
+      }
+
+      const referenceId =
+        (typeof data.id === 'string' && data.id) ||
+        (typeof data.reference === 'string' && data.reference) ||
+        (typeof data.inquiry_id === 'string' && data.inquiry_id) ||
+        null;
+
+      setSubmissionResult({ referenceId });
+    } catch (err) {
+      console.error('Inquiry submission failed:', err);
+      resetTurnstile();
+      setSubmitError(t.errorNetwork);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const buildInquiryText = (refId: string, timestamp: string) =>
+  // Fallback used only when the online submission fails or Turnstile can't
+  // load, so the visitor still has a one-click way to reach us with what
+  // they already typed.
+  const buildInquiryText = () =>
     lang === 'ja'
-      ? `【お問い合わせ控え】
-受付番号: ${refId}
-日時: ${timestamp}
+      ? `【お問い合わせ内容】
 貴社名: ${formData.companyName}
 ご担当者: ${formData.contactName}
 ご連絡先: ${formData.email} / ${formData.phone}
@@ -180,9 +196,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({
 希望時期: ${formData.desiredTimeline}
 内容:
 ${formData.description}`
-      : `[Inquiry Summary]
-Reference: ${refId}
-Date: ${timestamp}
+      : `[Inquiry Details]
 Company: ${formData.companyName}
 Contact: ${formData.contactName}
 Email/Phone: ${formData.email} / ${formData.phone}
@@ -193,21 +207,16 @@ Timeline: ${formData.desiredTimeline}
 Description:
 ${formData.description}`;
 
-  const buildMailtoLink = (refId: string, timestamp: string, targetEmail: string) => {
+  const buildFallbackMailtoLink = (targetEmail: string) => {
     const subject =
       lang === 'ja'
         ? `【電気設備工事のお問い合わせ】${formData.companyName || ''}`
         : `Electrical Contracting Inquiry - ${formData.companyName || ''}`;
-    return `mailto:${targetEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(
-      buildInquiryText(refId, timestamp)
-    )}`;
+    return `mailto:${targetEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildInquiryText())}`;
   };
 
   const copyInquiryPayload = () => {
-    if (!submissionResult) return;
-    navigator.clipboard.writeText(
-      buildInquiryText(submissionResult.referenceId, submissionResult.submittedAt)
-    );
+    navigator.clipboard.writeText(buildInquiryText());
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -254,52 +263,24 @@ ${formData.description}`;
             <CheckCircle2 className="w-8 h-8 shrink-0" />
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
-                {lang === 'ja' ? 'お問い合わせ内容を準備しました' : 'Your inquiry is ready to send'}
+                {t.successTitle}
               </h2>
               <p className="text-xs sm:text-sm text-slate-600 mt-1">
-                {lang === 'ja'
-                  ? 'お使いのメールアプリが開き、宛先と内容が入力された状態になります。内容をご確認のうえ「送信」を押してお送りください。開かない場合は下のボタンからお試しいただくか、内容をコピーして送信してください。'
-                  : "Your email app should now be open with the message pre-filled. Please review it and press send. If it didn't open, use the button below or copy the details to send manually."}
+                {t.successMessage}
               </p>
             </div>
           </div>
 
-          <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200 space-y-3 text-xs sm:text-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b border-slate-200 gap-1">
+          {submissionResult.referenceId && (
+            <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs sm:text-sm">
               <span className="font-bold text-slate-500">{t.referenceNumber}</span>
               <span className="font-mono font-bold text-slate-900 text-base">
                 {submissionResult.referenceId}
               </span>
             </div>
+          )}
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-              <span className="font-bold text-slate-500">
-                {lang === 'ja' ? '送信先メールアドレス' : 'Sending To'}
-              </span>
-              <span className="font-medium text-slate-800">
-                {submissionResult.targetEmail}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            <a
-              href={buildMailtoLink(submissionResult.referenceId, submissionResult.submittedAt, submissionResult.targetEmail)}
-              className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-sm font-bold px-5 py-3 rounded-xl transition-colors"
-            >
-              <Mail className="w-4 h-4" />
-              <span>{lang === 'ja' ? 'メールアプリを開いて送信する' : 'Open Email App to Send'}</span>
-            </a>
-
-            <button
-              type="button"
-              onClick={copyInquiryPayload}
-              className="inline-flex items-center gap-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-bold px-4 py-2.5 rounded-xl transition-colors"
-            >
-              {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-              <span>{copied ? t.copied : t.copyPayload}</span>
-            </button>
-
+          <div className="pt-2">
             <button
               type="button"
               onClick={() => {
@@ -315,11 +296,10 @@ ${formData.description}`;
                   desiredTimeline: '',
                   description: '',
                   privacyConsent: false,
-                  attachments: [],
                   honeypot: '',
                 });
               }}
-              className="text-xs text-slate-600 hover:text-slate-900 font-medium px-4 py-2.5"
+              className="text-xs text-slate-600 hover:text-slate-900 font-medium"
             >
               {t.sendAnother}
             </button>
@@ -333,9 +313,29 @@ ${formData.description}`;
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Error Banner */}
               {submitError && (
-                <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs sm:text-sm flex items-start gap-2">
-                  <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                  <span>{submitError}</span>
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs sm:text-sm space-y-3">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                    <span>{submitError}</span>
+                  </div>
+                  <div className="pt-2 border-t border-red-200/70 flex flex-wrap items-center gap-3">
+                    <span className="font-bold text-red-800">{t.fallbackHeading}</span>
+                    <a
+                      href={buildFallbackMailtoLink(emailFact?.value[lang] || 'yamakiyo@sweet.ocn.ne.jp')}
+                      className="inline-flex items-center gap-1.5 bg-white border border-red-300 hover:bg-red-100 text-red-800 font-bold px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>{t.fallbackEmailBtn}</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={copyInquiryPayload}
+                      className="inline-flex items-center gap-1.5 bg-white border border-red-300 hover:bg-red-100 text-red-800 font-bold px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copied ? t.copied : t.copyPayload}</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -535,59 +535,10 @@ ${formData.description}`;
                 />
               </div>
 
-              {/* Optional Attachments (Upload drawings/photos) */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-800">
-                  {t.uploadLabel}
-                </label>
-                <p className="text-[11px] text-slate-500">{t.uploadHint}</p>
-
-                <div className="flex items-center gap-3">
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 transition-colors">
-                    <Paperclip className="w-3.5 h-3.5" />
-                    <span>{lang === 'ja' ? 'ファイルを選択' : 'Select Files'}</span>
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*,.pdf"
-                      onChange={handleFileUpload}
-                      className="sr-only"
-                    />
-                  </label>
-
-                  {formData.attachments.length > 0 && (
-                    <span className="text-xs text-slate-500">
-                      {formData.attachments.length} {lang === 'ja' ? 'ファイル選択中' : 'file(s) selected'}
-                    </span>
-                  )}
-                </div>
-
-                {formData.attachments.length > 0 && (
-                  <div className="space-y-1.5 pt-1">
-                    {formData.attachments.map((att, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700"
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <FileText className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                          <span className="truncate">{att.name}</span>
-                          <span className="text-slate-400 text-[10px]">
-                            ({(att.size / 1024).toFixed(1)} KB)
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeAttachment(idx)}
-                          className="text-slate-400 hover:text-red-500 p-1"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* Attachment Note (no upload picker - files must be emailed directly) */}
+              <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                {t.attachmentNote}
+              </p>
 
               {/* Privacy Consent Checkbox */}
               <div className="pt-2">
@@ -613,10 +564,42 @@ ${formData.description}`;
                 </label>
               </div>
 
+              {/* Cloudflare Turnstile (bot / spam verification) */}
+              {turnstileSiteKey ? (
+                <div className="space-y-1.5">
+                  <TurnstileWidget
+                    ref={turnstileRef}
+                    siteKey={turnstileSiteKey}
+                    onToken={(token) => {
+                      setTurnstileToken(token);
+                      setTurnstileStatus('ready');
+                    }}
+                    onExpire={() => {
+                      setTurnstileToken(null);
+                      setTurnstileStatus('expired');
+                    }}
+                    onError={() => {
+                      setTurnstileToken(null);
+                      setTurnstileStatus('error');
+                    }}
+                  />
+                  {turnstileStatus === 'expired' && (
+                    <p className="text-xs text-amber-700">{t.errorTurnstileMissing}</p>
+                  )}
+                  {turnstileStatus === 'error' && (
+                    <p className="text-xs text-red-600">{t.errorTurnstileUnavailable}</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
+                  {t.errorTurnstileUnavailable}
+                </p>
+              )}
+
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !turnstileSiteKey}
                 className="w-full py-3.5 px-6 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-sm sm:text-base transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isSubmitting ? (
