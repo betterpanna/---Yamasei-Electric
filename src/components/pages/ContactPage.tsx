@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, PageId, InquiryFormData } from '../../types';
 import { translations } from '../../data/translations';
-import { defaultCompanyFacts, servicesData } from '../../data/companyData';
+import { defaultCompanyFacts, servicesData, GOOGLE_MAPS_ADDRESS_URL } from '../../data/companyData';
 import { TurnstileWidget, TurnstileWidgetHandle } from '../TurnstileWidget';
 import {
   Mail,
@@ -81,7 +81,10 @@ export const ContactPage: React.FC<ContactPageProps> = ({
   const mapEmbedSrc = mapsApiKey
     ? `https://www.google.com/maps/embed/v1/place?key=${mapsApiKey}&q=${mapQuery}&language=${lang === 'ja' ? 'ja' : 'en'}`
     : undefined;
-  const mapDirectionsUrl = `https://www.google.com/maps/search/?api=1&query=${mapQuery}`;
+  // Same fixed destination used site-wide (footer, etc.) so every "open in
+  // Google Maps" link resolves to the exact same place. The embedded map
+  // above (mapEmbedSrc) is untouched and keeps using the API key.
+  const mapDirectionsUrl = GOOGLE_MAPS_ADDRESS_URL;
 
   const resetTurnstile = () => {
     turnstileRef.current?.reset();
@@ -727,7 +730,8 @@ ${formData.description}`;
                   href={mapDirectionsUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 hover:text-amber-800 underline"
+                  aria-label={lang === 'ja' ? '本社所在地をGoogleマップで開く(新しいタブで開きます)' : 'Open head office location in Google Maps (opens in a new tab)'}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 hover:text-amber-800 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 rounded-sm"
                 >
                   <span>{lang === 'ja' ? 'Google マップで経路を見る' : 'Get directions on Google Maps'}</span>
                 </a>

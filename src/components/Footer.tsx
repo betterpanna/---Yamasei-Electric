@@ -1,7 +1,7 @@
 import React from 'react';
 import { PageId, Language } from '../types';
 import { translations } from '../data/translations';
-import { servicesData, defaultCompanyFacts } from '../data/companyData';
+import { servicesData, defaultCompanyFacts, GOOGLE_MAPS_ADDRESS_URL, PHONE_TEL_HREF } from '../data/companyData';
 import { Zap, Phone, Mail, MapPin } from 'lucide-react';
 
 interface FooterProps {
@@ -50,12 +50,18 @@ export const Footer: React.FC<FooterProps> = ({
             </p>
 
             <div className="space-y-2 pt-2 text-xs">
-              <div className="flex items-start gap-2 text-slate-400">
+              <a
+                href={GOOGLE_MAPS_ADDRESS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={lang === 'ja' ? '本社所在地をGoogleマップで開く(新しいタブで開きます)' : 'Open head office location in Google Maps (opens in a new tab)'}
+                className="flex items-start gap-2 text-slate-400 hover:text-white focus-visible:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 rounded-sm transition-colors"
+              >
                 <MapPin className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
                 <span>{addressFact?.value[lang]}</span>
-              </div>
+              </a>
               <a
-                href={`tel:${phoneFact?.value[lang].replace(/[^0-9]/g, '') || '0729846895'}`}
+                href={PHONE_TEL_HREF}
                 className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
               >
                 <Phone className="w-4 h-4 text-slate-500 shrink-0" />
@@ -137,7 +143,7 @@ export const Footer: React.FC<FooterProps> = ({
                 <span>{lang === 'ja' ? 'お問い合わせ・お見積り' : 'Inquiries & Free Quote'}</span>
               </button>
               <a
-                href={`tel:${phoneFact?.isVerified ? phoneFact?.value[lang].replace(/[^0-9]/g, '') : '0000000000'}`}
+                href={PHONE_TEL_HREF}
                 className="block text-center text-slate-300 hover:text-white font-medium text-xs py-2"
               >
                 <Phone className="w-3.5 h-3.5 inline mr-1.5" />

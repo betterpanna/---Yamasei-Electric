@@ -1,5 +1,14 @@
 import { CompanyFact, ServiceItem, ProjectItem } from '../types';
 
+// Canonical external links for the head office, used anywhere the address
+// or phone number should be directly actionable (footer, contact page).
+// Kept as a fixed destination rather than built from the postal address
+// string, so every "open in Google Maps" link resolves to the exact same
+// place regardless of how the display text is formatted.
+export const GOOGLE_MAPS_ADDRESS_URL =
+  'https://www.google.com/maps/search/?api=1&query=%E5%A4%A7%E9%98%AA%E5%BA%9C%E6%9D%B1%E5%A4%A7%E9%98%AA%E5%B8%82%E6%96%B0%E7%94%BA5-2';
+export const PHONE_TEL_HREF = 'tel:+81729846895';
+
 export interface CompanyProfile {
   nameJa: string;
   nameEn: string;
@@ -46,7 +55,7 @@ export const defaultCompanyFacts: CompanyFact[] = [
   {
     key: 'address',
     label: { ja: '本社・事業所所在地', en: 'Head Office Location' },
-    value: { ja: '〒579-8037 大阪府東大阪市新町5-2', en: '5-2 Shinmachi, Higashiosaka, Osaka 579-8037 Japan' },
+    value: { ja: '〒579-8037 大阪府東大阪市新町5-2', en: '5-2 Shinmachi, Higashiosaka, Osaka 579-8037, Japan' },
     isVerified: true,
   },
   {
