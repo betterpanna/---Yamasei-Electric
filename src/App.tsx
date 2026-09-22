@@ -19,8 +19,30 @@ import { ServiceAreaPage } from './components/pages/ServiceAreaPage';
 import { ContactPage } from './components/pages/ContactPage';
 import { PrivacyPage } from './components/pages/PrivacyPage';
 
+// Real, bookmarkable URLs for every page that has one. "project-detail" has
+// no path of its own - it's reached in-app from the Projects page and isn't
+// listed in the sitemap, so navigating to it doesn't change the URL.
+const PAGE_PATHS: Partial<Record<PageId, string>> = {
+  home: '/',
+  services: '/services',
+  about: '/about',
+  projects: '/projects',
+  'service-area': '/service-area',
+  contact: '/contact',
+  privacy: '/privacy',
+};
+
+const pageForPath = (pathname: string): PageId => {
+  const entry = (Object.entries(PAGE_PATHS) as [PageId, string][]).find(
+    ([, path]) => path === pathname
+  );
+  return entry ? entry[0] : 'home';
+};
+
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<PageId>('home');
+  const [currentPage, setCurrentPageState] = useState<PageId>(() =>
+    pageForPath(window.location.pathname)
+  );
   const [selectedProjectId, setSelectedProjectId] = useState<string>('proj-shimizu');
   const [lang, setLang] = useState<Language>('ja');
 
@@ -31,6 +53,25 @@ export default function App() {
   useEffect(() => {
     document.documentElement.lang = lang;
   }, [lang]);
+
+  // Keep the URL in sync with in-app navigation so every top-level page has
+  // a real, shareable, crawlable address (matching public/sitemap.xml), and
+  // handle the browser's back/forward buttons.
+  const setCurrentPage = (page: PageId) => {
+    setCurrentPageState(page);
+    const path = PAGE_PATHS[page];
+    if (path && window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPageState(pageForPath(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const handleSelectServiceForQuote = (serviceId: string) => {
     setPreselectedService(serviceId);
